@@ -1,6 +1,13 @@
 package com.saul.loginGym.service;
 
+import java.text.Normalizer;
+import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -21,12 +28,20 @@ import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.stereotype.Service;
 
-import com.saul.loginGym.dto.ClaseObjetivo;
-
 import io.github.bonigarcia.wdm.WebDriverManager;
 
 @Service
 public class LoginGymService {
+
+    // ====== Tu DTO ya existente ======
+    public static class ClaseObjetivo {
+        public final String dia;       // "MIÉRCOLES"
+        public final String nombre;    // "POWER VIRTUAL"
+        public final String rangoHora; // "07:00 / 08:00"
+        public ClaseObjetivo(String dia, String nombre, String rangoHora) {
+            this.dia = dia; this.nombre = nombre; this.rangoHora = rangoHora;
+        }
+    }
 
     public void loginTrainingGym() {
         System.out.println("🔹 Iniciando login automático (multi-reserva simple)...");
@@ -84,7 +99,7 @@ public class LoginGymService {
             // ====== Aquí tu lista de clases a reservar (añade o quita) ======
             List<ClaseObjetivo> lote = List.of(
                 new ClaseObjetivo("MIÉRCOLES", "POWER VIRTUAL", "07:00 / 08:00")
-                , new ClaseObjetivo("MIÉRCOLES", "HIIT 30'", "10:30 / 11:00")
+                 , new ClaseObjetivo("MIÉRCOLES", "HIIT 30'", "10:30 / 11:00")
                 // , new ClaseObjetivo("JUEVES", "CICLO", "19:00 / 20:00")
             );
 
@@ -100,19 +115,22 @@ public class LoginGymService {
 
     // ====== NUEVO: multi-reserva simple, sin prioridades ni reintentos ======
     private void reservarMultiplesClases(WebDriver driver, List<ClaseObjetivo> lote) throws InterruptedException {
+        ZoneId zone = ZoneId.systemDefault(); // o ZoneId.of("Europe/Madrid")
         for (ClaseObjetivo c : lote) {
             try {
+                if (!debeReservarseAhora(c, zone)) {
+                    System.out.println("⏭️ Fuera de ventana de 15h. Se omite por ahora: " + c.nombre);
+                    continue;
+                }
+
                 System.out.printf("%n🏁 Reservando → %s | %s | %s%n", c.dia, c.nombre, c.rangoHora);
 
-                // asegurar que seguimos en el iframe y en Actividades
                 reentrarEnIframeSiHaceFalta(driver);
                 asegurarSeccionActividades(driver);
 
-                // flujo de reserva (igual que antes)
                 clickClasePorNombreYHora(driver, c.nombre, c.rangoHora, c.dia);
-                // manejarReserva(driver) ya se llama dentro de clickClasePorNombreYHora()
+                // manejarReserva(driver) ya se llama dentro
 
-                // pequeña pausa entre reservas
                 Thread.sleep(1500);
 
             } catch (Exception e) {
@@ -120,6 +138,7 @@ public class LoginGymService {
             }
         }
     }
+
 
     private void reentrarEnIframeSiHaceFalta(WebDriver driver) {
         try {
@@ -772,4 +791,60 @@ public class LoginGymService {
             default: return -1;
         }
     }
+    
+ // Normaliza texto (quita acentos y pasa a mayúsculas)
+    private String norm(String s) {
+        String n = Normalizer.normalize(s, Normalizer.Form.NFD).replaceAll("\\p{M}", "");
+        return n.toUpperCase(Locale.ROOT).trim();
+    }
+
+    // Convierte "MIÉRCOLES" -> DayOfWeek
+    private DayOfWeek diaToDOW(String dia) {
+        switch (norm(dia)) {
+            case "LUNES": return DayOfWeek.MONDAY;
+            case "MARTES": return DayOfWeek.TUESDAY;
+            case "MIERCOLES": return DayOfWeek.WEDNESDAY;
+            case "JUEVES": return DayOfWeek.THURSDAY;
+            case "VIERNES": return DayOfWeek.FRIDAY;
+            case "SABADO": return DayOfWeek.SATURDAY;
+            case "DOMINGO": return DayOfWeek.SUNDAY;
+            default: throw new IllegalArgumentException("Día no válido: " + dia);
+        }
+    }
+
+    // Extrae la hora de inicio de "07:00 / 08:00"
+    private LocalTime horaInicioDeRango(String rango) {
+        String ini = rango.split("/")[0].trim();     // "07:00"
+        DateTimeFormatter f = DateTimeFormatter.ofPattern("HH:mm");
+        return LocalTime.parse(ini, f);
+    }
+
+    // Próxima fecha (hoy o la semana siguiente) para ese día+hora
+    private LocalDateTime proximoInicio(String dia, String rangoHora, ZoneId zone) {
+        DayOfWeek objetivo = diaToDOW(dia);
+        LocalDate hoy = LocalDate.now(zone);
+        LocalTime horaIni = horaInicioDeRango(rangoHora);
+
+        // si hoy es el día y aún no ha pasado la hora, usamos hoy; si ya pasó, saltamos a la semana que viene
+        int delta = objetivo.getValue() - hoy.getDayOfWeek().getValue();
+        if (delta < 0) delta += 7;
+        LocalDate fecha = hoy.plusDays(delta);
+        LocalDateTime dt = LocalDateTime.of(fecha, horaIni);
+
+        if (dt.isBefore(LocalDateTime.now(zone))) {
+            // ya pasó la hora de hoy; ir a la próxima semana
+            dt = dt.plusDays(7);
+        }
+        return dt;
+    }
+
+    // ¿Se debe reservar ahora? (faltan <= 15h)
+    private boolean debeReservarseAhora(ClaseObjetivo c, ZoneId zone) {
+        LocalDateTime inicio = proximoInicio(c.dia, c.rangoHora, zone);
+        long horas = java.time.Duration.between(LocalDateTime.now(zone), inicio).toHours();
+        long minutos = java.time.Duration.between(LocalDateTime.now(zone), inicio).toMinutesPart();
+        System.out.printf("⏱️ %s %s → faltan %dh %02dm%n", c.dia, c.rangoHora, horas, minutos);
+        return horas <= 15 && horas >= 0; // dentro de las próximas 15 horas
+    }
+
 }
