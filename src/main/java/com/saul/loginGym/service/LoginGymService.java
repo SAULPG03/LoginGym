@@ -86,8 +86,8 @@
 		        System.out.println("⏳ Esperando conexión WebSocket...");
 		        Thread.sleep(5000);
 	
-//		        clickClasePorNombreYHora(driver, "POWER VIRTUAL", "07:00 / 08:00", "MIÉRCOLES");
-		        clickClasePorNombreYHora(driver, "HIIT 30'", "10:30 / 11:00", "MIÉRCOLES");
+		        clickClasePorNombreYHora(driver, "POWER VIRTUAL", "07:00 / 08:00", "MIÉRCOLES");
+		        //clickClasePorNombreYHora(driver, "HIIT 30'", "10:30 / 11:00", "MIÉRCOLES");
 	
 		    } catch (Exception e) {
 		        e.printStackTrace();
@@ -109,6 +109,9 @@
 		        // Esperar a que aparezca el modal
 		        Thread.sleep(2000);
 		        
+		        // DEBUG: Mostrar estructura del modal
+		        debugModal(driver);
+		        
 		        // Detectar qué tipo de modal es
 		        boolean tieneSeleccionPlaza = esModalConPlazas(driver);
 		        
@@ -128,30 +131,98 @@
 		    }
 		}
 		
+		private void debugModal(WebDriver driver) {
+		    try {
+		        System.out.println("\n🔍 DEBUG MODAL:");
+		        
+		        // Mostrar todos los botones visibles
+		        List<WebElement> botones = driver.findElements(
+		            By.xpath("//div[contains(@class,'btn-tg')]")
+		        );
+		        
+		        for (int i = 0; i < botones.size(); i++) {
+		            if (botones.get(i).isDisplayed()) {
+		                String texto = botones.get(i).getText();
+		                String ngClick = botones.get(i).getAttribute("ng-click");
+		                System.out.println("  Botón " + (i+1) + ": '" + texto + "' [" + ngClick + "]");
+		            }
+		        }
+		        
+		        // Verificar si existe tabla de puestos
+		        List<WebElement> tabla = driver.findElements(By.id("puestos-horario"));
+		        System.out.println("  Tabla puestos: " + (!tabla.isEmpty() ? "SÍ" : "NO"));
+		        
+		        System.out.println("🔍 FIN DEBUG\n");
+		        
+		    } catch (Exception e) {
+		        System.err.println("Error en debug: " + e.getMessage());
+		    }
+		}
+		
 		// ======================================
-		// 🔹 DETECTAR SI EL MODAL TIENE SELECCIÓN DE PLAZAS
+		// 🔹 DETECTAR SI EL MODAL TIENE SELECCIÓN DE PLAZAS (MEJORADO)
 		// ======================================
 		private boolean esModalConPlazas(WebDriver driver) {
 		    try {
-		        // Buscar el texto específico que indica selección de plaza
-		        WebElement infoTexto = driver.findElement(By.id("mInfo"));
-		        String texto = infoTexto.getText().toLowerCase();
+		        System.out.println("🔍 Detectando tipo de modal...");
 		        
-		        // Verificar si contiene "seleccione su plaza"
-		        if (texto.contains("seleccione su plaza") || texto.contains("seleccione tu plaza")) {
+		        // MÉTODO 1: Buscar directamente la tabla de puestos (más confiable)
+		        List<WebElement> tablaPuestos = driver.findElements(
+		            By.xpath("//div[@id='puestos-horario' and contains(@class,'col-xs-12')]")
+		        );
+		        
+		        if (!tablaPuestos.isEmpty() && tablaPuestos.get(0).isDisplayed()) {
+		            System.out.println("✅ Tabla de puestos encontrada → Modal CON plazas");
 		            return true;
 		        }
 		        
-		        // Alternativamente, verificar si existe la tabla de puestos
-		        List<WebElement> tablaPuestos = driver.findElements(By.id("puestos-horario"));
-		        return !tablaPuestos.isEmpty();
+		        // MÉTODO 2: Verificar si existe el botón con ng-click="actionSelectPlace()"
+		        List<WebElement> botonSeleccionarPlaza = driver.findElements(
+		            By.xpath("//div[@ng-click='actionSelectPlace()']")
+		        );
+		        
+		        if (!botonSeleccionarPlaza.isEmpty() && botonSeleccionarPlaza.get(0).isDisplayed()) {
+		            System.out.println("✅ Botón 'actionSelectPlace()' encontrado → Modal CON plazas");
+		            return true;
+		        }
+		        
+		        // MÉTODO 3: Verificar el texto del modal (solo si los anteriores fallan)
+		        try {
+		            WebElement modalBody = driver.findElement(
+		                By.xpath("//div[contains(@class,'modal-body') and contains(@class,'tg-centrado')]")
+		            );
+		            String textoModal = modalBody.getText().toLowerCase();
+		            
+		            if (textoModal.contains("seleccione su plaza") || 
+		                textoModal.contains("seleccione tu plaza")) {
+		                System.out.println("✅ Texto 'seleccione su plaza' encontrado → Modal CON plazas");
+		                return true;
+		            }
+		        } catch (Exception e) {
+		            // Ignorar si no encuentra el modal body
+		        }
+		        
+		        // MÉTODO 4: Verificar si existe botón con setDataBook (indica SIN plazas)
+		        List<WebElement> botonReservarDirecto = driver.findElements(
+		            By.xpath("//div[@ng-click=\"setDataBook(selectedSchedule, undefined)\"]")
+		        );
+		        
+		        if (!botonReservarDirecto.isEmpty() && botonReservarDirecto.get(0).isDisplayed()) {
+		            System.out.println("✅ Botón 'setDataBook' encontrado → Modal SIN plazas");
+		            return false;
+		        }
+		        
+		        // Por defecto: asumir SIN plazas
+		        System.out.println("⚠️ No se pudo determinar con certeza → Asumiendo SIN plazas");
+		        return false;
 		        
 		    } catch (Exception e) {
-		        System.err.println("⚠️ No se pudo determinar tipo de modal, asumiendo SIN plazas");
+		        System.err.println("⚠️ Error al detectar tipo de modal: " + e.getMessage());
+		        e.printStackTrace();
 		        return false;
 		    }
 		}
-
+		
 		// ======================================
 		// 🔹 RESERVAR CON SELECCIÓN DE PLAZA
 		// ======================================
@@ -200,29 +271,78 @@
 		}
 
 		// ======================================
-		// 🔹 RESERVAR DIRECTA (SIN PLAZAS)
+		// 🔹 RESERVAR DIRECTA (SIN PLAZAS) - MEJORADO
 		// ======================================
 		private void reservarDirecta(WebDriver driver, WebDriverWait wait) {
 		    try {
 		        System.out.println("✅ Reservando directamente (sin plaza)...");
 		        
-		        // Esperar y hacer clic en el botón "reservar"
-		        WebElement btnReservar = wait.until(ExpectedConditions.elementToBeClickable(
-		            By.xpath("//div[@ng-click=\"setDataBook(selectedSchedule, undefined)\"]//span[contains(text(),'reservar')]/..")
-		        ));
+		        // ESTRATEGIA 1: Buscar el botón por ng-click
+		        try {
+		            WebElement btnReservar = wait.until(ExpectedConditions.elementToBeClickable(
+		                By.xpath("//div[@ng-click=\"setDataBook(selectedSchedule, undefined)\" and contains(@class,'btn-tg')]")
+		            ));
+		            
+		            JavascriptExecutor js = (JavascriptExecutor) driver;
+		            js.executeScript("arguments[0].scrollIntoView(true);", btnReservar);
+		            Thread.sleep(500);
+		            js.executeScript("arguments[0].click();", btnReservar);
+		            
+		            System.out.println("✅ Clic en botón 'reservar' (método 1) ejecutado");
+		            Thread.sleep(2000);
+		            return;
+		            
+		        } catch (Exception e1) {
+		            System.err.println("⚠️ Método 1 falló, intentando método 2...");
+		        }
 		        
-		        JavascriptExecutor js = (JavascriptExecutor) driver;
-		        js.executeScript("arguments[0].click();", btnReservar);
+		        // ESTRATEGIA 2: Buscar por texto "reservar" dentro del modal de actividad
+		        try {
+		            WebElement btnReservar = wait.until(ExpectedConditions.elementToBeClickable(
+		                By.xpath("//div[contains(@class,'btn-tg-modal-actividad')]//span[contains(translate(text(),'RESERVA','reserva'),'reservar')]/..")
+		            ));
+		            
+		            JavascriptExecutor js = (JavascriptExecutor) driver;
+		            js.executeScript("arguments[0].click();", btnReservar);
+		            
+		            System.out.println("✅ Clic en botón 'reservar' (método 2) ejecutado");
+		            Thread.sleep(2000);
+		            return;
+		            
+		        } catch (Exception e2) {
+		            System.err.println("⚠️ Método 2 falló, intentando método 3...");
+		        }
 		        
-		        System.out.println("✅ Clic en botón 'reservar' ejecutado");
-		        Thread.sleep(2000);
+		        // ESTRATEGIA 3: Buscar todos los botones con "reservar" visible
+		        List<WebElement> botonesReservar = driver.findElements(
+		            By.xpath("//div[contains(@class,'btn-tg')]//span[contains(text(),'reservar') or contains(text(),'RESERVAR')]/..")
+		        );
+		        
+		        for (WebElement btn : botonesReservar) {
+		            if (btn.isDisplayed() && btn.isEnabled()) {
+		                String ngClick = btn.getAttribute("ng-click");
+		                System.out.println("🔍 Botón encontrado con ng-click: " + ngClick);
+		                
+		                // Excluir el botón de "actionSelectPlace" (es para plazas)
+		                if (ngClick != null && !ngClick.contains("actionSelectPlace")) {
+		                    JavascriptExecutor js = (JavascriptExecutor) driver;
+		                    js.executeScript("arguments[0].click();", btn);
+		                    
+		                    System.out.println("✅ Clic en botón 'reservar' (método 3) ejecutado");
+		                    Thread.sleep(2000);
+		                    return;
+		                }
+		            }
+		        }
+		        
+		        throw new Exception("No se encontró el botón de reservar");
 		        
 		    } catch (Exception e) {
 		        System.err.println("⚠️ ERROR al reservar directa: " + e.getMessage());
+		        e.printStackTrace();
 		        throw new RuntimeException(e);
 		    }
-		}
-	
+		}	
 		// ======================================
 		// 🔹 Encuesta (si aparece)
 		// ======================================
