@@ -86,13 +86,140 @@
 		        System.out.println("⏳ Esperando conexión WebSocket...");
 		        Thread.sleep(5000);
 	
-		        clickClasePorNombreYHora(driver, "POWER VIRTUAL", "07:00 / 08:00", "MIÉRCOLES");
+//		        clickClasePorNombreYHora(driver, "POWER VIRTUAL", "07:00 / 08:00", "MIÉRCOLES");
+		        clickClasePorNombreYHora(driver, "HIIT 30'", "10:30 / 11:00", "MIÉRCOLES");
 	
 		    } catch (Exception e) {
 		        e.printStackTrace();
 		    } finally {
 		        System.out.println("⏸️ Navegador dejado abierto para depuración.");
 		        // driver.quit();
+		    }
+		}
+		
+		// ======================================
+		// 🔹 MÉTODO PARA MANEJAR LA RESERVA (CON O SIN PLAZA)
+		// ======================================
+		private void manejarReserva(WebDriver driver) {
+		    WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(15));
+		    
+		    try {
+		        System.out.println("🎫 Esperando modal de reserva...");
+		        
+		        // Esperar a que aparezca el modal
+		        Thread.sleep(2000);
+		        
+		        // Detectar qué tipo de modal es
+		        boolean tieneSeleccionPlaza = esModalConPlazas(driver);
+		        
+		        if (tieneSeleccionPlaza) {
+		            System.out.println("🪑 Modal CON selección de plaza detectado");
+		            reservarConPlaza(driver, wait);
+		        } else {
+		            System.out.println("✅ Modal SIN selección de plaza detectado");
+		            reservarDirecta(driver, wait);
+		        }
+		        
+		        System.out.println("✅ Reserva completada exitosamente!");
+		        
+		    } catch (Exception e) {
+		        System.err.println("⚠️ ERROR en reserva: " + e.getMessage());
+		        e.printStackTrace();
+		    }
+		}
+		
+		// ======================================
+		// 🔹 DETECTAR SI EL MODAL TIENE SELECCIÓN DE PLAZAS
+		// ======================================
+		private boolean esModalConPlazas(WebDriver driver) {
+		    try {
+		        // Buscar el texto específico que indica selección de plaza
+		        WebElement infoTexto = driver.findElement(By.id("mInfo"));
+		        String texto = infoTexto.getText().toLowerCase();
+		        
+		        // Verificar si contiene "seleccione su plaza"
+		        if (texto.contains("seleccione su plaza") || texto.contains("seleccione tu plaza")) {
+		            return true;
+		        }
+		        
+		        // Alternativamente, verificar si existe la tabla de puestos
+		        List<WebElement> tablaPuestos = driver.findElements(By.id("puestos-horario"));
+		        return !tablaPuestos.isEmpty();
+		        
+		    } catch (Exception e) {
+		        System.err.println("⚠️ No se pudo determinar tipo de modal, asumiendo SIN plazas");
+		        return false;
+		    }
+		}
+
+		// ======================================
+		// 🔹 RESERVAR CON SELECCIÓN DE PLAZA
+		// ======================================
+		private void reservarConPlaza(WebDriver driver, WebDriverWait wait) {
+		    try {
+		        System.out.println("🪑 Buscando plaza disponible...");
+		        
+		        // Esperar a que cargue la tabla de puestos
+		        wait.until(ExpectedConditions.presenceOfElementLocated(By.id("puestos-horario")));
+		        Thread.sleep(1000);
+		        
+		        // Buscar el primer puesto libre (puesto_libre)
+		        List<WebElement> puestosLibres = driver.findElements(
+		            By.xpath("//div[contains(@class,'puesto_libre') and contains(@class,'puesto')]")
+		        );
+		        
+		        if (puestosLibres.isEmpty()) {
+		            throw new Exception("No hay plazas disponibles");
+		        }
+		        
+		        WebElement primerPuestoLibre = puestosLibres.get(0);
+		        String numeroPuesto = primerPuestoLibre.findElement(By.className("label")).getText();
+		        
+		        System.out.println("🎯 Seleccionando puesto: " + numeroPuesto);
+		        
+		        // Hacer clic en el puesto usando JavaScript
+		        JavascriptExecutor js = (JavascriptExecutor) driver;
+		        js.executeScript("arguments[0].click();", primerPuestoLibre);
+		        
+		        Thread.sleep(1000);
+		        
+		        // Hacer clic en el botón "reservar"
+		        WebElement btnReservar = wait.until(ExpectedConditions.elementToBeClickable(
+		            By.xpath("//div[@ng-click='actionSelectPlace()']//span[contains(text(),'reservar')]/..")
+		        ));
+		        
+		        System.out.println("✅ Confirmando reserva del puesto " + numeroPuesto);
+		        js.executeScript("arguments[0].click();", btnReservar);
+		        
+		        Thread.sleep(2000);
+		        
+		    } catch (Exception e) {
+		        System.err.println("⚠️ ERROR al reservar con plaza: " + e.getMessage());
+		        throw new RuntimeException(e);
+		    }
+		}
+
+		// ======================================
+		// 🔹 RESERVAR DIRECTA (SIN PLAZAS)
+		// ======================================
+		private void reservarDirecta(WebDriver driver, WebDriverWait wait) {
+		    try {
+		        System.out.println("✅ Reservando directamente (sin plaza)...");
+		        
+		        // Esperar y hacer clic en el botón "reservar"
+		        WebElement btnReservar = wait.until(ExpectedConditions.elementToBeClickable(
+		            By.xpath("//div[@ng-click=\"setDataBook(selectedSchedule, undefined)\"]//span[contains(text(),'reservar')]/..")
+		        ));
+		        
+		        JavascriptExecutor js = (JavascriptExecutor) driver;
+		        js.executeScript("arguments[0].click();", btnReservar);
+		        
+		        System.out.println("✅ Clic en botón 'reservar' ejecutado");
+		        Thread.sleep(2000);
+		        
+		    } catch (Exception e) {
+		        System.err.println("⚠️ ERROR al reservar directa: " + e.getMessage());
+		        throw new RuntimeException(e);
 		    }
 		}
 	
@@ -283,6 +410,7 @@
 		        
 		        // 9. HACER CLIC CON ANGULARJS
 		        realizarClickAngularJS(driver, claseObjetivo, nombreActividad, rangoHora);
+		        manejarReserva(driver);
 		        
 		    } catch (Exception e) {
 		        System.err.println("⚠️ ERROR: " + e.getMessage());
